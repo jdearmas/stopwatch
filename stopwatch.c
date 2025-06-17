@@ -1,5 +1,5 @@
 /*
- * High-Performance Console Stopwatch with Splits
+ * High-Performance Console Stopwatch with Hierarchical Subgoals
  *
  * Optimizations:
  * - Cache Console Handle and Buffer Info
@@ -8,12 +8,22 @@
  * - Reduced overhead in format_time
  * - Single-pass UI redraw when needed
  *
- * Functionality remains identical: main timer, splits, Org-mode logging
- * Controls: s=start/stop, r=reset, g=start split, h=stop split, t=save log, q=quit
+ * Functionality extended: recursive subgoals (subgoals under subgoals) and navigation up the tree
+ * Controls:
+ *   s = start/stop
+ *   r = reset
+ *   g = start top-level split/subgoal (if no active subgoal, creates level-1; if active, creates child)
+ *   n = start nested subgoal under current active subgoal
+ *   h = stop current subgoal (auto-move up on stop)
+ *   u = move up one level in subgoal tree without stopping
+ *   t = save log
+ *   q = quit
+ *
+ * Org-mode logging supports nested headings matching depth.
  *
  * Compilation:
- * cl /O2 stopwatch.c
- * .\stopwatch.exe
+ *   cl /O2 stopwatch.c
+ *   .\stopwatch.exe
  */
 
 #include <windows.h>
@@ -23,12 +33,14 @@
 #include <string.h>
 
 #define MAX_GOAL_LEN 256
-#define MAX_SPLITS   20
+#define MAX_SPLITS   50
 #define FILE_PATH    "C:\\Users\\John\\org\\done.org"
 
 typedef struct {
     char name[MAX_GOAL_LEN];
     double start, end;
+    int parent;    // index of parent split (-1 for top-level)
+    int level;     // depth (0 = level-1 top-level)
 } Split;
 
 // Global state
@@ -37,7 +49,7 @@ static double elapsed = 0;
 static LARGE_INTEGER freq, startCount;
 static Split splits[MAX_SPLITS];
 static int splitCount = 0;
-static int activeSplit = -1;
+static int activeSplit = -1;  // index of current open subgoal or -1
 static char mainGoal[MAX_GOAL_LEN];
 static time_t logStart;
 
@@ -55,7 +67,6 @@ static inline void format_time(double t, char* buf) {
     int s=totalSec%60;
     int m=(totalSec/60)%60;
     int h=totalSec/3600;
-    // Avoid sprintf overhead by using minimal writes
     buf[0]='0'+h/10; buf[1]='0'+h%10;
     buf[2]=':';
     buf[3]='0'+m/10; buf[4]='0'+m%10;
@@ -68,13 +79,13 @@ static inline void format_time(double t, char* buf) {
     buf[12]='\0';
 }
 
-// Move cursor position
+// Move cursor
 static inline void move_cursor(short x, short y) {
     COORD pos = {x,y};
     SetConsoleCursorPosition(hConsole, pos);
 }
 
-// Clear entire screen (used only on static redraw)
+// Clear screen
 static void clear_screen() {
     DWORD written;
     COORD home = {0,0};
@@ -83,29 +94,33 @@ static void clear_screen() {
     SetConsoleCursorPosition(hConsole, home);
 }
 
-// Redraw static UI once per change
+// Draw UI
 static void draw_static() {
     clear_screen();
     printf("=== Enhanced Stopwatch ===\n");
     printf("Goal  : %s\n", *mainGoal ? mainGoal : "(none)");
     printf("Time  : 00:00:00.000\n");
-    printf("Splits (%d):\n", splitCount);
+    printf("Subgoals (%d):\n", splitCount);
     for(int i=0;i<splitCount;i++){
+        // indent by level
+        int indent = splits[i].level * 2;
+        for(int j=0;j<indent;j++) putchar(' ');
+        // timestamps
         format_time(splits[i].start, startBuf);
         if(splits[i].end>=0) {
             format_time(splits[i].end, endBuf);
             format_time(splits[i].end - splits[i].start, durBuf);
-            printf(" %2d) %-12s -> %-12s= %-12s %s\n",
+            printf("%2d) %-12s -> %-12s = %-12s %s\n",
                    i+1, startBuf, endBuf, durBuf, splits[i].name);
         } else {
-            printf(" %2d) %-12s-> %-12s = %-12s %s\n",
-                   i+1, "--:--:--.---", "--:--:--.---", "--:--:--.---  ", splits[i].name);
+            printf("%2d) %-12s-> %-12s = %-12s %s\n",
+                   i+1, "--:--:--.---", "--:--:--.---  ", "--:--:--.---  ", splits[i].name);
         }
     }
-    printf("\nControls: s/start/stop r/reset g/start-split h/stop-split t/save-log q/quit\n");
+    printf("\nControls: s/start-stop r/reset g/start-subgoal n/nested-subgoal h/stop u/up t/save-log q/quit\n");
 }
 
-// Update only time and active split
+// Update dynamic
 static void draw_dynamic() {
     LARGE_INTEGER now, delta;
     double cur;
@@ -118,42 +133,46 @@ static void draw_dynamic() {
     if(activeSplit>=0) {
         double rel = cur - splits[activeSplit].start;
         format_time(rel, durBuf);
-        move_cursor(0, 3 + activeSplit);
-        printf(" %2d) %-12s-> %-12s = %-12s %s\n",
-               activeSplit+1, "--:--:--.---","--:--:--.---  ",durBuf,splits[activeSplit].name);
+        int row = 3 + activeSplit;
+        move_cursor(0, row);
+        int indent = splits[activeSplit].level * 2;
+        for(int j=0;j<indent;j++) putchar(' ');
+        printf("%2d) %-12s-> %-12s = %-12s %s\n",
+               activeSplit+1, "--:--:--.---", "--:--:--.---  ", durBuf, splits[activeSplit].name);
     }
 }
 
-// Append to Org-mode log
+// Save Org-mode log with nested headings
 static void save_log() {
+    if(!*mainGoal) return;
     FILE* f=fopen(FILE_PATH,"a"); if(!f)return;
     time_t endt=time(NULL);
     struct tm *st=localtime(&logStart), *et=localtime(&endt);
     double tot = difftime(endt, logStart);
     format_time(tot, timeBuf);
-    // Main goal
+    // main goal as top-level heading
     fprintf(f,"* %s\n  :LOGBOOK:\n  CLOCK: [%04d-%02d-%02d %02d:%02d]--[%04d-%02d-%02d %02d:%02d] => %s\n  :END:\n\n",
             mainGoal, st->tm_year+1900,st->tm_mon+1,st->tm_mday,st->tm_hour,st->tm_min,
             et->tm_year+1900,et->tm_mon+1,et->tm_mday,et->tm_hour,et->tm_min,timeBuf);
-    // Splits
+    // subgoals
     for(int i=0;i<splitCount;i++){
         if(splits[i].end<0) continue;
-        double d = splits[i].end - splits[i].start;
+        int stars = splits[i].level + 2;
+        for(int j=0;j<stars;j++) fputc('*', f);
+        fprintf(f," %s\n", splits[i].name);
         format_time(splits[i].start,startBuf);
         format_time(splits[i].end,endBuf);
-        format_time(d,durBuf);
-        fprintf(f,"** %s\n  :LOGBOOK:\n  CLOCK: [%02s]--[%02s] => %s\n  :END:\n\n",
-                splits[i].name,startBuf,endBuf,durBuf);
+        format_time(splits[i].end - splits[i].start, durBuf);
+        fprintf(f,"  :LOGBOOK:\n  CLOCK: [%s]--[%s] => %s\n  :END:\n\n",
+                startBuf, endBuf, durBuf);
     }
     fclose(f);
 }
 
 int main(){
-    // Initialize console
     hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     CONSOLE_SCREEN_BUFFER_INFO cs; GetConsoleScreenBufferInfo(hConsole,&cs);
     screenWidth = cs.dwSize.X; screenHeight = cs.dwSize.Y;
-
     QueryPerformanceFrequency(&freq);
     *mainGoal='\0';
     draw_static();
@@ -175,13 +194,34 @@ int main(){
                     draw_static(); break;
                 case 'g':
                     if(running && splitCount<MAX_SPLITS){
-                        splits[splitCount].start=cur; splits[splitCount].end=-1;
-                        printf("\nEnter split name: "); fgets(splits[splitCount].name,MAX_GOAL_LEN,stdin);
+                        splits[splitCount].parent = activeSplit;
+                        splits[splitCount].level = (activeSplit>=0 ? splits[activeSplit].level + 1 : 0);
+                        splits[splitCount].start = cur; splits[splitCount].end = -1;
+                        printf("\nEnter subgoal name: "); fgets(splits[splitCount].name,MAX_GOAL_LEN,stdin);
                         splits[splitCount].name[strcspn(splits[splitCount].name,"\n")]='\0';
-                        activeSplit=splitCount++; draw_static(); }
+                        activeSplit = splitCount++; draw_static();
+                    }
+                    break;
+                case 'n':
+                    if(running && activeSplit>=0 && splitCount<MAX_SPLITS){
+                        splits[splitCount].parent = activeSplit;
+                        splits[splitCount].level = splits[activeSplit].level + 1;
+                        splits[splitCount].start = cur; splits[splitCount].end = -1;
+                        printf("\nEnter nested subgoal name: "); fgets(splits[splitCount].name,MAX_GOAL_LEN,stdin);
+                        splits[splitCount].name[strcspn(splits[splitCount].name,"\n")]='\0';
+                        activeSplit = splitCount++; draw_static();
+                    }
                     break;
                 case 'h':
-                    if(activeSplit>=0){ splits[activeSplit].end=cur; activeSplit=-1; draw_static(); }
+                    if(activeSplit>=0){
+                        // stop current and move up one level
+                        splits[activeSplit].end = cur;
+                        activeSplit = splits[activeSplit].parent;
+                        draw_static();
+                    }
+                    break;
+                case 'u':
+                    if(activeSplit>=0){ activeSplit = splits[activeSplit].parent; draw_static(); }
                     break;
                 case 't': if(!running && *mainGoal) save_log(); break;
                 case 'q': return 0;
