@@ -177,91 +177,105 @@ fn main() -> crossterm::Result<()> {
                     let _ = draw_dynamic(&mut stdout, start_time, elapsed, &splits, &main_goal);
                 }
             }
-            Message::Input(Event::Key(key)) => match key.code {
-                KeyCode::Char('s') => {
-                    if running {
-                        elapsed += Instant::now().duration_since(start_time);
-                        running = false;
-                    } else {
-                        disable_raw_mode()?;
-                        print!("\nEnter main goal: "); io::stdout().flush()?;
-                        let mut input = String::new();
-                        io::stdin().read_line(&mut input)?;
-                        enable_raw_mode()?;
-                        main_goal = Some(input.trim().to_string());
-                        start_time = Instant::now();
-                        elapsed = Duration::ZERO;
-                        splits.clear();
-                        active = None;
-                        running = true;
+            Message::Input(evt) => {
+                match evt {
+                    Event::Key(key) => match key.code {
+                        KeyCode::Char('s') => {
+                            if running {
+                                elapsed += Instant::now().duration_since(start_time);
+                                running = false;
+                            } else {
+                                disable_raw_mode()?;
+                                print!("\nEnter main goal: "); io::stdout().flush()?;
+                                let mut input = String::new(); io::stdin().read_line(&mut input)?;
+                                enable_raw_mode()?;
+                                main_goal = Some(input.trim().to_string());
+                                start_time = Instant::now();
+                                elapsed = Duration::ZERO;
+                                splits.clear();
+                                active = None;
+                                running = true;
+                            }
+                            draw_static(&mut stdout, &main_goal, elapsed, &splits)?;
+                        }
+                        KeyCode::Char('r') => {
+                            running = false;
+                            elapsed = Duration::ZERO;
+                            splits.clear();
+                            main_goal = None;
+                            active = None;
+                            draw_static(&mut stdout, &main_goal, elapsed, &splits)?;
+                        }
+                        KeyCode::Char('g') if running && splits.len() < MAX_SPLITS => {
+                            disable_raw_mode()?;
+                            print!("\nEnter subgoal name: "); io::stdout().flush()?;
+                            let mut input = String::new(); io::stdin().read_line(&mut input)?;enable_raw_mode()?;
+                            let name = input.trim().to_string();
+                            let parent = active;
+                            let level = parent.map_or(0, |i| splits[i].level + 1);
+                            let now = Instant::now();
+                            let start_off = elapsed + now.duration_since(start_time);
+                            let start_dt = Local::now();
+                            splits.push(Split { name, start_offset: start_off, end_offset: None, start_dt, end_dt: None, parent, level });
+                            active = Some(splits.len() - 1);
+                            draw_static(&mut stdout, &main_goal, elapsed + now.duration_since(start_time), &splits)?;
+                        }
+                        KeyCode::Char('n') if running && active.is_some() && splits.len() < MAX_SPLITS => {
+                            disable_raw_mode()?;
+                            print!("\nEnter nested subgoal name: "); io::stdout().flush()?;
+                            let mut input = String::new(); io::stdin().read_line(&mut input)?; enable_raw_mode()?;
+                            let name = input.trim().to_string();
+                            let parent_idx = active.unwrap();
+                            let level = splits[parent_idx].level + 1;
+                            let now = Instant::now();
+                            let start_off = elapsed + now.duration_since(start_time);
+                            let start_dt = Local::now();
+                            splits.push(Split { name, start_offset: start_off, end_offset: None, start_dt, end_dt: None, parent: Some(parent_idx), level });
+                            active = Some(splits.len() - 1);
+                            draw_static(&mut stdout, &main_goal, elapsed + now.duration_since(start_time), &splits)?;
+                        }
+                        KeyCode::Char('h') => {
+                            if let Some(idx) = active {
+                                let now = Instant::now();
+                                let end_off = elapsed + now.duration_since(start_time);
+                                let end_dt = Local::now();
+                                splits[idx].end_offset = Some(end_off);
+                                splits[idx].end_dt = Some(end_dt);
+                                active = splits[idx].parent;
+                                draw_static(&mut stdout, &main_goal, elapsed + now.duration_since(start_time), &splits)?;
+                            }
+                        }
+                        KeyCode::Char('u') => {
+                            if let Some(idx) = active {
+                                active = splits[idx].parent;
+                                draw_static(&mut stdout, &main_goal, elapsed, &splits)?;
+                            }
+                        }
+                        KeyCode::Char('d') => {
+                            draw_static(&mut stdout, &main_goal, elapsed, &splits)?;
+                        }
+                        KeyCode::Char('t') if !running => {
+                            if let Some(goal) = &main_goal {
+                                let _ = save_log(goal, start_time, &splits, &log_file);
+                            }
+                        }
+                        KeyCode::Char('q') => break,
+                        _ => {}
+                    },
+                    Event::Resize(_, _) => {
+                        // On terminal resize, redraw entire UI
+                        if running {
+                            let now = Instant::now();
+                            let total = elapsed + now.duration_since(start_time);
+                            draw_static(&mut stdout, &main_goal, total, &splits)?;
+                            let _ = draw_dynamic(&mut stdout, start_time, elapsed, &splits, &main_goal);
+                        } else {
+                            draw_static(&mut stdout, &main_goal, elapsed, &splits)?;
+                        }
                     }
-                    draw_static(&mut stdout, &main_goal, elapsed, &splits)?;
+                    _ => {}
                 }
-                KeyCode::Char('r') => {
-                    running = false;
-                    elapsed = Duration::ZERO;
-                    splits.clear();
-                    main_goal = None;
-                    active = None;
-                    draw_static(&mut stdout, &main_goal, elapsed, &splits)?;
-                }
-                KeyCode::Char('g') if running && splits.len() < MAX_SPLITS => {
-                    disable_raw_mode()?;
-                    print!("\nEnter subgoal name: "); io::stdout().flush()?;
-                    let mut input = String::new(); io::stdin().read_line(&mut input)?;
-                    enable_raw_mode()?;
-                    let name = input.trim().to_string();
-                    let parent = active;
-                    let level = parent.map_or(0, |idx| splits[idx].level + 1);
-                    let now = Instant::now();
-                    let start_off = elapsed + now.duration_since(start_time);
-                    let start_dt = Local::now();
-                    splits.push(Split { name, start_offset: start_off, end_offset: None, start_dt, end_dt: None, parent, level });
-                    active = Some(splits.len() - 1);
-                    draw_static(&mut stdout, &main_goal, elapsed + now.duration_since(start_time), &splits)?;
-                }
-                KeyCode::Char('n') if running && active.is_some() && splits.len() < MAX_SPLITS => {
-                    disable_raw_mode()?;
-                    print!("\nEnter nested subgoal name: "); io::stdout().flush()?;
-                    let mut input = String::new(); io::stdin().read_line(&mut input)?; enable_raw_mode()?;
-                    let name = input.trim().to_string();
-                    let parent = active.unwrap();
-                    let level = splits[parent].level + 1;
-                    let now = Instant::now();
-                    let start_off = elapsed + now.duration_since(start_time);
-                    let start_dt = Local::now();
-                    splits.push(Split { name, start_offset: start_off, end_offset: None, start_dt, end_dt: None, parent: Some(parent), level });
-                    active = Some(splits.len() - 1);
-                    draw_static(&mut stdout, &main_goal, elapsed + now.duration_since(start_time), &splits)?;
-                }
-                KeyCode::Char('h') => {
-                    if let Some(idx) = active {
-                        let now = Instant::now();
-                        let end_off = elapsed + now.duration_since(start_time);
-                        let end_dt = Local::now();
-                        splits[idx].end_offset = Some(end_off);
-                        splits[idx].end_dt = Some(end_dt);
-                        active = splits[idx].parent;
-                        draw_static(&mut stdout, &main_goal, elapsed + now.duration_since(start_time), &splits)?;
-                    }
-                }
-                KeyCode::Char('u') => {
-                    if let Some(idx) = active {
-                        active = splits[idx].parent;
-                        draw_static(&mut stdout, &main_goal, elapsed, &splits)?;
-                    }
-                }
-                KeyCode::Char('d') => {
-                    draw_static(&mut stdout, &main_goal, elapsed, &splits)?;
-                }
-                KeyCode::Char('t') if !running => {
-                    if let Some(goal) = &main_goal {
-                        let _ = save_log(goal, start_time, &splits, &log_file);
-                    }
-                }
-                KeyCode::Char('q') => break,
-                _ => {}
-            },
+            }
             _ => {}
         }
     }
