@@ -1,3 +1,4 @@
+use std::env;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
@@ -10,7 +11,6 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 use crossterm::ExecutableCommand;
 
 const MAX_SPLITS: usize = 100;
-const LOG_FILE: &str = "done.org";
 
 struct Split {
     name: String,
@@ -46,17 +46,17 @@ fn draw_static<W: Write>(out: &mut W, main_goal: &Option<String>, total: Duratio
     for (i, split) in splits.iter().enumerate() {
         let indent = split.level * 2;
         out.execute(MoveTo(indent as u16, 3 + i as u16))?;
-        let start = format_time(split.start_offset);
+        let start_str = format_time(split.start_offset);
         if let Some(end_off) = split.end_offset {
             let dur = end_off.checked_sub(split.start_offset).unwrap_or_default();
             out.execute(Print(format!("{:2}) {} -> {} = {} {}\n",
                 i+1,
-                start,
+                start_str,
                 format_time(end_off),
                 format_time(dur),
                 split.name)))?;
         } else {
-            out.execute(Print(format!("{:2}) {} -> --:--:--.--- = --:--:--.--- {}\n", i+1, start, split.name)))?;
+            out.execute(Print(format!("{:2}) {} -> --:--:--.--- = --:--:--.--- {}\n", i+1, start_str, split.name)))?;
         }
     }
     out.execute(Print("\nControls: s=start/stop r=reset g=subgoal n=nested h=stop u=up d=redraw t=save-log q=quit\n"))?;
@@ -87,11 +87,11 @@ fn draw_dynamic<W: Write>(out: &mut W, start_time: Instant, elapsed: Duration, a
     Ok(())
 }
 
-fn save_log(main_goal: &str, start_instant: Instant, splits: &[Split]) -> io::Result<()> {
+fn save_log(main_goal: &str, start_instant: Instant, splits: &[Split], log_file: &str) -> io::Result<()> {
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(LOG_FILE)?;
+        .open(log_file)?;
     let start_dt = Local::now() - (Instant::now() - start_instant);
     let end_dt = Local::now();
     let total = end_dt.signed_duration_since(start_dt);
@@ -116,6 +116,9 @@ fn save_log(main_goal: &str, start_instant: Instant, splits: &[Split]) -> io::Re
 }
 
 fn main() -> crossterm::Result<()> {
+    // Accept optional log file path as CLI arg (full or relative), default to "done.org"
+    let log_file = env::args().nth(1).unwrap_or_else(|| "done.org".to_string());
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
 
@@ -217,7 +220,7 @@ fn main() -> crossterm::Result<()> {
                     }
                     KeyCode::Char('t') if !running => {
                         if let Some(goal) = &main_goal {
-                            let _ = save_log(goal, start_time, &splits);
+                            let _ = save_log(goal, start_time, &splits, &log_file);
                         }
                     }
                     KeyCode::Char('q') => break,
