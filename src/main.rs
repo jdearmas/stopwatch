@@ -48,7 +48,7 @@ fn draw_static<W: Write>(out: &mut W, main_goal: &Option<String>, total: Duratio
     out.execute(Print(format!("Subgoals ({}):\n", splits.len())))?;
     for (i, split) in splits.iter().enumerate() {
         let indent = split.level * 2;
-        out.execute(MoveTo(indent as u16, 3 + i as u16))?;
+        out.execute(MoveTo(indent as u16, 4 + i as u16))?;
         let start_str = format_time(split.start_offset);
         if let Some(end_off) = split.end_offset {
             let dur = end_off.checked_sub(split.start_offset).unwrap_or_default();
@@ -67,18 +67,24 @@ fn draw_static<W: Write>(out: &mut W, main_goal: &Option<String>, total: Duratio
     Ok(())
 }
 
-fn draw_dynamic<W: Write>(out: &mut W, start_time: Instant, elapsed: Duration, splits: &[Split]) -> io::Result<()> {
+fn draw_dynamic<W: Write>(out: &mut W, start_time: Instant, elapsed: Duration, splits: &[Split], main_goal: &Option<String>) -> io::Result<()> {
     let now = Instant::now();
     let total = elapsed + now.duration_since(start_time);
-    let cur_time = format_time(total);
 
+    // Always redraw main goal above time
     out.execute(MoveTo(0, 1))?;
+    out.execute(Print(format!("Goal  : {}   ", main_goal.as_deref().unwrap_or("(none)"))))?;
+
+    // Redraw time just below
+    let cur_time = format_time(total);
+    out.execute(MoveTo(0, 2))?;
     out.execute(Print(format!("Time  : {}   ", cur_time)))?;
 
+    // Update all running subgoals
     for (i, split) in splits.iter().enumerate() {
         if split.end_offset.is_none() {
             let rel = total.checked_sub(split.start_offset).unwrap_or_default();
-            let row = 3 + i as u16;
+            let row = 4 + i as u16;
             let indent = split.level * 2;
             let start_str = format_time(split.start_offset);
             out.execute(MoveTo(indent as u16, row))?;
@@ -168,7 +174,7 @@ fn main() -> crossterm::Result<()> {
         match msg {
             Message::Tick => {
                 if running {
-                    let _ = draw_dynamic(&mut stdout, start_time, elapsed, &splits);
+                    let _ = draw_dynamic(&mut stdout, start_time, elapsed, &splits, &main_goal);
                 }
             }
             Message::Input(Event::Key(key)) => match key.code {
