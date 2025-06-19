@@ -1,6 +1,13 @@
-use std::{env, fs::OpenOptions, io::{self, Write}, time::{Duration, Instant}, thread, sync::mpsc};
+use std::{
+    env,
+    fs::OpenOptions,
+    io::{self, Write},
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
 
-use chrono::{Local, DateTime};
+use chrono::{DateTime, Local};
 use crossterm::cursor::MoveTo;
 use crossterm::event::{poll, read, Event, KeyCode};
 use crossterm::style::Print;
@@ -40,10 +47,18 @@ fn clear_screen<W: Write>(out: &mut W) -> io::Result<()> {
     Ok(())
 }
 
-fn draw_static<W: Write>(out: &mut W, main_goal: &Option<String>, total: Duration, splits: &[Split]) -> io::Result<()> {
+fn draw_static<W: Write>(
+    out: &mut W,
+    main_goal: &Option<String>,
+    total: Duration,
+    splits: &[Split],
+) -> io::Result<()> {
     clear_screen(out)?;
     out.execute(Print("=== Enhanced Stopwatch ===\n"))?;
-    out.execute(Print(format!("Goal  : {}\n", main_goal.as_deref().unwrap_or("(none)"))))?;
+    out.execute(Print(format!(
+        "Goal  : {}\n",
+        main_goal.as_deref().unwrap_or("(none)")
+    )))?;
     out.execute(Print(format!("Time  : {}\n", format_time(total))))?;
     out.execute(Print(format!("Subgoals ({}):\n", splits.len())))?;
     for (i, split) in splits.iter().enumerate() {
@@ -52,17 +67,21 @@ fn draw_static<W: Write>(out: &mut W, main_goal: &Option<String>, total: Duratio
         let start_str = format_time(split.start_offset);
         if let Some(end_off) = split.end_offset {
             let dur = end_off.checked_sub(split.start_offset).unwrap_or_default();
-            out.execute(Print(format!("{:2}) {} -> {} = {} {}\n",
-                i+1,
+            out.execute(Print(format!(
+                "{:2}) {} -> {} = {} {}\n",
+                i + 1,
                 start_str,
                 format_time(end_off),
                 format_time(dur),
-                split.name)))?;
+                split.name
+            )))?;
         } else {
-            out.execute(Print(format!("{:2}) {} -> --:--:--.--- = --:--:--.--- {}\n",
-                i+1,
+            out.execute(Print(format!(
+                "{:2}) {} -> --:--:--.--- = --:--:--.--- {}\n",
+                i + 1,
                 start_str,
-                split.name)))?;
+                split.name
+            )))?;
         }
     }
     out.execute(Print("\nControls: s=start/stop r=reset c=continue g=subgoal n=nested h=stop u=up d=redraw t=save-log q=quit\n"))?;
@@ -70,13 +89,22 @@ fn draw_static<W: Write>(out: &mut W, main_goal: &Option<String>, total: Duratio
     Ok(())
 }
 
-fn draw_dynamic<W: Write>(out: &mut W, start_time: Instant, elapsed: Duration, splits: &[Split], main_goal: &Option<String>) -> io::Result<()> {
+fn draw_dynamic<W: Write>(
+    out: &mut W,
+    start_time: Instant,
+    elapsed: Duration,
+    splits: &[Split],
+    main_goal: &Option<String>,
+) -> io::Result<()> {
     let now = Instant::now();
     let total = elapsed + now.duration_since(start_time);
 
     // redraw goal and time
     out.execute(MoveTo(0, 1))?;
-    out.execute(Print(format!("Goal  : {}   ", main_goal.as_deref().unwrap_or("(none)"))))?;
+    out.execute(Print(format!(
+        "Goal  : {}   ",
+        main_goal.as_deref().unwrap_or("(none)")
+    )))?;
     let cur_time = format_time(total);
     out.execute(MoveTo(0, 2))?;
     out.execute(Print(format!("Time  : {}   ", cur_time)))?;
@@ -89,20 +117,30 @@ fn draw_dynamic<W: Write>(out: &mut W, start_time: Instant, elapsed: Duration, s
             let indent = (split.level * 2) as u16;
             let start_str = format_time(split.start_offset);
             out.execute(MoveTo(indent, row))?;
-            out.execute(Print(format!("{:2}) {} -> {} = {} {}\n",
-                i+1,
+            out.execute(Print(format!(
+                "{:2}) {} -> {} = {} {}\n",
+                i + 1,
                 start_str,
                 format_time(total),
                 format_time(rel),
-                split.name)))?;
+                split.name
+            )))?;
         }
     }
     out.flush()?;
     Ok(())
 }
 
-fn save_log(main_goal: &str, start_instant: Instant, splits: &[Split], log_file: &str) -> io::Result<()> {
-    let mut file = OpenOptions::new().create(true).append(true).open(log_file)?;
+fn save_log(
+    main_goal: &str,
+    start_instant: Instant,
+    splits: &[Split],
+    log_file: &str,
+) -> io::Result<()> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file)?;
     let start_dt = Local::now() - (Instant::now() - start_instant);
     let end_dt = Local::now();
     let total = end_dt.signed_duration_since(start_dt);
@@ -110,10 +148,13 @@ fn save_log(main_goal: &str, start_instant: Instant, splits: &[Split], log_file:
 
     writeln!(file, "* {}", main_goal)?;
     writeln!(file, "  :LOGBOOK:")?;
-    writeln!(file, "  CLOCK: [{}]--[{}] => {}",
+    writeln!(
+        file,
+        "  CLOCK: [{}]--[{}] => {}",
         start_dt.format("%Y-%m-%d %H:%M"),
         end_dt.format("%Y-%m-%d %H:%M"),
-        tot_str)?;
+        tot_str
+    )?;
     writeln!(file, "  :END:\n")?;
 
     for split in splits {
@@ -122,10 +163,13 @@ fn save_log(main_goal: &str, start_instant: Instant, splits: &[Split], log_file:
             let stars = "*".repeat(split.level + 2);
             writeln!(file, "{} {}", stars, split.name)?;
             writeln!(file, "  :LOGBOOK:")?;
-            writeln!(file, "  CLOCK: [{}]--[{}] => {}",
+            writeln!(
+                file,
+                "  CLOCK: [{}]--[{}] => {}",
                 split.start_dt.format("%Y-%m-%d %H:%M"),
                 end_dt.format("%Y-%m-%d %H:%M"),
-                format_time(dur))?;
+                format_time(dur)
+            )?;
             writeln!(file, "  :END:\n")?;
         }
     }
@@ -141,21 +185,21 @@ fn main() -> crossterm::Result<()> {
     // ticker thread
     {
         let tx = tx.clone();
-        thread::spawn(move || {
-            loop {
-                thread::sleep(Duration::from_millis(TICK_RATE_MS));
-                if tx.send(Message::Tick).is_err() { break; }
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_millis(TICK_RATE_MS));
+            if tx.send(Message::Tick).is_err() {
+                break;
             }
         });
     }
     // input thread
     {
         let tx = tx.clone();
-        thread::spawn(move || {
-            loop {
-                if poll(Duration::from_millis(TICK_RATE_MS)).unwrap_or(false) {
-                    if let Ok(evt) = read() {
-                        if tx.send(Message::Input(evt)).is_err() { break; }
+        thread::spawn(move || loop {
+            if poll(Duration::from_millis(TICK_RATE_MS)).unwrap_or(false) {
+                if let Ok(evt) = read() {
+                    if tx.send(Message::Input(evt)).is_err() {
+                        break;
                     }
                 }
             }
@@ -186,8 +230,10 @@ fn main() -> crossterm::Result<()> {
                             running = false;
                         } else {
                             disable_raw_mode()?;
-                            print!("\nEnter main goal: "); io::stdout().flush()?;
-                            let mut input = String::new(); io::stdin().read_line(&mut input)?;
+                            print!("\nEnter main goal: ");
+                            io::stdout().flush()?;
+                            let mut input = String::new();
+                            io::stdin().read_line(&mut input)?;
                             enable_raw_mode()?;
                             main_goal = Some(input.trim().to_string());
                             start_time = Instant::now();
@@ -215,8 +261,10 @@ fn main() -> crossterm::Result<()> {
                     }
                     KeyCode::Char('g') if running && splits.len() < MAX_SPLITS => {
                         disable_raw_mode()?;
-                        print!("\nEnter subgoal name: "); io::stdout().flush()?;
-                        let mut input = String::new(); io::stdin().read_line(&mut input)?;
+                        print!("\nEnter subgoal name: ");
+                        io::stdout().flush()?;
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input)?;
                         enable_raw_mode()?;
                         let name = input.trim().to_string();
                         let parent = active;
@@ -224,14 +272,31 @@ fn main() -> crossterm::Result<()> {
                         let now = Instant::now();
                         let start_off = elapsed + now.duration_since(start_time);
                         let start_dt = Local::now();
-                        splits.push(Split { name, start_offset: start_off, end_offset: None, start_dt, end_dt: None, parent, level });
+                        splits.push(Split {
+                            name,
+                            start_offset: start_off,
+                            end_offset: None,
+                            start_dt,
+                            end_dt: None,
+                            parent,
+                            level,
+                        });
                         active = Some(splits.len() - 1);
-                        draw_static(&mut stdout, &main_goal, elapsed + now.duration_since(start_time), &splits)?;
+                        draw_static(
+                            &mut stdout,
+                            &main_goal,
+                            elapsed + now.duration_since(start_time),
+                            &splits,
+                        )?;
                     }
-                    KeyCode::Char('n') if running && active.is_some() && splits.len() < MAX_SPLITS => {
+                    KeyCode::Char('n')
+                        if running && active.is_some() && splits.len() < MAX_SPLITS =>
+                    {
                         disable_raw_mode()?;
-                        print!("\nEnter nested subgoal name: "); io::stdout().flush()?;
-                        let mut input = String::new(); io::stdin().read_line(&mut input)?;
+                        print!("\nEnter nested subgoal name: ");
+                        io::stdout().flush()?;
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input)?;
                         enable_raw_mode()?;
                         let name = input.trim().to_string();
                         let parent = active.unwrap();
@@ -239,9 +304,22 @@ fn main() -> crossterm::Result<()> {
                         let now = Instant::now();
                         let start_off = elapsed + now.duration_since(start_time);
                         let start_dt = Local::now();
-                        splits.push(Split { name, start_offset: start_off, end_offset: None, start_dt, end_dt: None, parent: Some(parent), level });
+                        splits.push(Split {
+                            name,
+                            start_offset: start_off,
+                            end_offset: None,
+                            start_dt,
+                            end_dt: None,
+                            parent: Some(parent),
+                            level,
+                        });
                         active = Some(splits.len() - 1);
-                        draw_static(&mut stdout, &main_goal, elapsed + now.duration_since(start_time), &splits)?;
+                        draw_static(
+                            &mut stdout,
+                            &main_goal,
+                            elapsed + now.duration_since(start_time),
+                            &splits,
+                        )?;
                     }
                     KeyCode::Char('h') => {
                         if let Some(idx) = active {
@@ -251,7 +329,12 @@ fn main() -> crossterm::Result<()> {
                             splits[idx].end_offset = Some(end_off);
                             splits[idx].end_dt = Some(end_dt);
                             active = splits[idx].parent;
-                            draw_static(&mut stdout, &main_goal, elapsed + now.duration_since(start_time), &splits)?;
+                            draw_static(
+                                &mut stdout,
+                                &main_goal,
+                                elapsed + now.duration_since(start_time),
+                                &splits,
+                            )?;
                         }
                     }
                     KeyCode::Char('u') => {
@@ -276,7 +359,9 @@ fn main() -> crossterm::Result<()> {
                     let total = if running {
                         let now = Instant::now();
                         elapsed + now.duration_since(start_time)
-                    } else { elapsed };
+                    } else {
+                        elapsed
+                    };
                     draw_static(&mut stdout, &main_goal, total, &splits)?;
                     if running {
                         let _ = draw_dynamic(&mut stdout, start_time, elapsed, &splits, &main_goal);
