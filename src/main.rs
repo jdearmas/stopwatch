@@ -54,13 +54,17 @@ fn draw_static<W: Write>(
     splits: &[Split],
 ) -> io::Result<()> {
     clear_screen(out)?;
-    out.execute(Print("=== Enhanced Stopwatch ===\n"))?;
+    out.execute(Print("=== Stopwatch ==="))?;
+    out.execute(MoveTo(0, 1))?;
     out.execute(Print(format!(
-        "Goal  : {}\n",
+        "Goal  : {}",
         main_goal.as_deref().unwrap_or("(none)")
     )))?;
-    out.execute(Print(format!("Time  : {}\n", format_time(total))))?;
-    out.execute(Print(format!("Subgoals ({}):\n", splits.len())))?;
+    out.execute(MoveTo(0, 2))?;
+    out.execute(Print(format!("Time  : {}", format_time(total))))?;
+    out.execute(MoveTo(0, 3))?;
+    out.execute(Print(format!("Subgoals ({}):", splits.len())))?;
+    out.execute(MoveTo(0, 4))?;
     for (i, split) in splits.iter().enumerate() {
         let indent = (split.level * 2) as u16;
         out.execute(MoveTo(indent, 4 + i as u16))?;
@@ -68,7 +72,7 @@ fn draw_static<W: Write>(
         if let Some(end_off) = split.end_offset {
             let dur = end_off.checked_sub(split.start_offset).unwrap_or_default();
             out.execute(Print(format!(
-                "{:2}) {} -> {} = {} {}\n",
+                "{:2}) {} -> {} = {} {}",
                 i + 1,
                 start_str,
                 format_time(end_off),
@@ -77,13 +81,16 @@ fn draw_static<W: Write>(
             )))?;
         } else {
             out.execute(Print(format!(
-                "{:2}) {} -> --:--:--.--- = --:--:--.--- {}\n",
+                "{:2}) {} -> --:--:--.--- = --:--:--.--- {}",
                 i + 1,
                 start_str,
                 split.name
             )))?;
         }
     }
+
+    let controls_line_row = 4 + splits.len() as u16 + 1;
+    out.execute(MoveTo(0, controls_line_row));
     out.execute(Print("\nControls: s=start/stop r=reset c=continue g=subgoal n=nested h=stop u=up d=redraw t=save-log q=quit\n"))?;
     out.flush()?;
     Ok(())
